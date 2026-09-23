@@ -1,0 +1,138 @@
+package mail;
+
+#[derive(Debug, PartialEq)]
+pub enum ErrorKind {
+    Invalid,
+    Limit,
+    Encoding,
+    Header,
+}
+
+pub struct Error {
+    pub kind: ErrorKind,
+    pub offset: isize,
+    pub message: string,
+}
+
+impl ToString for Error {
+    fn to_string(self: Error) -> string {
+        f"mail at {self.offset}: {self.message}"
+    }
+}
+
+impl Debug for Error {
+    fn debug(self: Error) -> string {
+        self.to_string()
+    }
+}
+
+fn failure(kind: ErrorKind, offset: isize, message: string) -> Error {
+    Error { kind, offset, message }
+}
+
+pub struct Limits {
+    pub max_input_bytes: isize,
+    pub max_address_bytes: isize,
+    pub max_addresses: isize,
+    pub max_comment_depth: isize,
+    pub max_line_bytes: isize,
+    pub max_header_bytes: isize,
+    pub max_headers: isize,
+    pub max_value_bytes: isize,
+    pub max_decoded_bytes: isize,
+}
+
+impl Limits {
+    pub fn standard() -> Limits {
+        Limits {
+            max_input_bytes: 1048576,
+            max_address_bytes: 4096,
+            max_addresses: 128,
+            max_comment_depth: 8,
+            max_line_bytes: 998,
+            max_header_bytes: 65536,
+            max_headers: 128,
+            max_value_bytes: 16384,
+            max_decoded_bytes: 65536,
+        }
+    }
+
+    pub fn validate(self: Limits) -> Result[(), Error] {
+        if self.max_input_bytes < 0 || self.max_address_bytes < 0 || self.max_addresses < 0
+            || self.max_comment_depth < 0
+            || self.max_line_bytes < 0
+            || self.max_line_bytes > 9223372036854775805
+            || self.max_header_bytes < 0
+            || self.max_headers < 0
+            || self.max_value_bytes < 0
+            || self.max_decoded_bytes < 0 {
+            return Result::Err(failure(ErrorKind::Limit, 0, "invalid mail limits"))
+        }
+        Result::Ok(())
+    }
+}
+
+pub struct Address {
+    pub name: string,
+    pub address: string,
+    pub local: string,
+    pub domain: string,
+}
+
+pub struct Field {
+    pub name: string,
+    pub value: string,
+}
+
+pub struct Headers {
+    fields_value: Vec[Field],
+    body_offset_value: isize,
+}
+
+impl Headers {
+    pub fn len(self: Headers) -> isize {
+        self.fields_value.len()
+    }
+
+    pub fn body_offset(self: Headers) -> isize {
+        self.body_offset_value
+    }
+
+    pub fn fields(self: Headers) -> Vec[Field] {
+        self.fields_value.copy()
+    }
+
+    pub fn values(self: Headers, name: string) -> Vec[string] {
+        let values = Vec::new();
+        for field in self.fields_value {
+            if field.name.to_ascii_lowercase() == name.to_ascii_lowercase() {
+                values.push(field.value);
+            }
+        }
+        values
+    }
+
+    pub fn decoded(self: Headers, name: string, limits: Limits) -> Result[Option[string], Error] {
+        let values = self.values(name);
+        if values.is_empty() {
+            Result::Ok(Option::None)
+        } else {
+            Result::Ok(Option::Some(decode_header_value(values[0], limits)?))
+        }
+    }
+
+    pub fn addresses(self: Headers, name: string, limits: Limits) -> Result[Vec[Address], Error] {
+        limits.validate()?;
+        let output = Vec::new();
+        for value in self.values(name) {
+            let parsed = parse_address_list(value, limits)?;
+            if parsed.len() > limits.max_addresses - output.len() {
+                return Result::Err(failure(ErrorKind::Limit, 0, "address count exceeds limit"))
+            }
+            for address in parsed {
+                output.push(address);
+            }
+        }
+        Result::Ok(output)
+    }
+}

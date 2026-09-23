@@ -1,0 +1,68 @@
+package mail;
+
+use ecosystem::mime;
+use ecosystem::textproto;
+use std::bytes;
+use std::io;
+
+pub fn decode_header_value(value: string, limits: Limits) -> Result[string, Error] {
+    limits.validate()?;
+    if value.byte_len() > limits.max_value_bytes {
+        return Result::Err(failure(ErrorKind::Limit, 0, "header value exceeds limit"))
+    }
+    mime::decode_header(
+        value,
+        mime::Limits {
+            max_input_bytes: limits.max_value_bytes,
+            max_parameters: 0,
+            max_value_bytes: limits.max_value_bytes,
+            max_output_bytes: limits.max_decoded_bytes,
+        },
+    ).map_err(
+        |error| failure(
+            if error.kind == mime::ErrorKind::Limit {
+                ErrorKind::Limit
+            } else {
+                ErrorKind::Encoding
+            },
+            error.offset,
+            error.message,
+        ),
+    )
+}
+
+pub fn parse_headers(input: bytes::Bytes, limits: Limits) -> Result[Headers, Error] {
+    limits.validate()?;
+    if input.len() > limits.max_input_bytes {
+        return Result::Err(failure(ErrorKind::Limit, 0, "message input exceeds limit"))
+    }
+    let source = textproto::Reader::new(
+        io::Cursor::new(input),
+        textproto::Limits {
+            max_line_bytes: limits.max_line_bytes,
+            max_header_bytes: limits.max_header_bytes,
+            max_headers: limits.max_headers,
+            max_value_bytes: limits.max_value_bytes,
+            max_dot_bytes: 0,
+        },
+    ).map_err(|error| failure(ErrorKind::Limit, error.offset, error.message))?;
+    let raw = source.read_headers(true).map_err(
+        |error| failure(
+            if error.kind == textproto::ErrorKind::Limit {
+                ErrorKind::Limit
+            } else {
+                ErrorKind::Header
+            },
+            error.offset,
+            error.message,
+        ),
+    )?;
+    let fields = Vec::new();
+    for field in raw.fields() {
+        let value = field.value_text().map_err(
+            |error| failure(ErrorKind::Encoding, source.offset(), error.message),
+        )?;
+        fields.push(Field { name: field.name, value });
+    }
+    Result::Ok(Headers { fields_value: fields, body_offset_value: source.offset() })
+}

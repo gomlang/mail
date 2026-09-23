@@ -1,0 +1,6 @@
+[module]
+path = "ecosystem::mail"
+
+[dependencies]
+"ecosystem::mime" = "0.1.0"
+"ecosystem::textproto" = "0.1.0"

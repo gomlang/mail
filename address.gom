@@ -1,0 +1,486 @@
+package mail;
+
+use ecosystem::mime;
+
+fn address_byte(value: byte) -> bool {
+    (value >= b'A' && value <= b'Z') || (value >= b'a' && value <= b'z')
+        || (value >= b'0' && value <= b'9')
+        || value == b'!'
+        || value == b'#'
+        || value == b'$'
+        || value == b'%'
+        || value == b'&'
+        || value == b'\''
+        || value == b'*'
+        || value == b'+'
+        || value == b'-'
+        || value == b'/'
+        || value == b'='
+        || value == b'?'
+        || value == b'^'
+        || value == b'_'
+        || value == b'`'
+        || value == b'{'
+        || value == b'|'
+        || value == b'}'
+        || value == b'~'
+}
+
+fn validate_local(value: string, base: isize) -> Result[(), Error] {
+    if value.byte_len() == 0 {
+        return Result::Err(failure(ErrorKind::Invalid, base, "empty local part"))
+    }
+    if value.byte_get(0) == b'"' {
+        if value.byte_len() < 2 || value.byte_get(value.byte_len() - 1) != b'"' {
+            return Result::Err(failure(ErrorKind::Invalid, base, "unterminated quoted local part"))
+        }
+        let mut index = 1;
+        while index < value.byte_len() - 1 {
+            let byte = value.byte_get(index);
+            if byte == b'\\' {
+                index += 1;
+                if index == value.byte_len() - 1 || value.byte_get(index) < 32
+                    || value.byte_get(index) > 126 {
+                    return Result::Err(
+                        failure(ErrorKind::Invalid, base + index, "invalid quoted local escape"),
+                    )
+                }
+            } else if byte < 32 || byte > 126 || byte == b'"' {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "invalid quoted local byte"),
+                )
+            }
+            index += 1;
+        }
+        return Result::Ok(())
+    }
+    let mut dot = true;
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if byte == b'.' {
+            if dot {
+                return Result::Err(failure(ErrorKind::Invalid, base + index, "empty local atom"))
+            }
+            dot = true;
+        } else if address_byte(byte) {
+            dot = false;
+        } else {
+            return Result::Err(failure(ErrorKind::Invalid, base + index, "invalid local atom"))
+        }
+    }
+    if dot {
+        return Result::Err(
+            failure(ErrorKind::Invalid, base + value.byte_len() - 1, "trailing local dot"),
+        )
+    }
+    Result::Ok(())
+}
+
+fn validate_domain(value: string, base: isize) -> Result[(), Error] {
+    if value.byte_len() == 0 {
+        return Result::Err(failure(ErrorKind::Invalid, base, "empty domain"))
+    }
+    if value.byte_get(0) == b'[' {
+        if value.byte_len() < 3 || value.byte_get(value.byte_len() - 1) != b']' {
+            return Result::Err(failure(ErrorKind::Invalid, base, "unterminated domain literal"))
+        }
+        for index in 1..value.byte_len() - 1 {
+            let byte = value.byte_get(index);
+            if byte < 33 || byte > 126 || byte == b'[' || byte == b']' || byte == b'\\' {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "invalid domain literal byte"),
+                )
+            }
+        }
+        return Result::Ok(())
+    }
+    let mut label_start = 0;
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if byte == b'.' {
+            if index == label_start || index - label_start > 63 || value.byte_get(index - 1) == b'-' {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "invalid domain label"),
+                )
+            }
+            label_start = index + 1;
+        } else if (byte >= b'A' && byte <= b'Z') || (byte >= b'a' && byte <= b'z')
+            || (byte >= b'0' && byte <= b'9')
+            || (byte == b'-' && index > label_start) {} else {
+            return Result::Err(failure(ErrorKind::Invalid, base + index, "invalid domain byte"))
+        }
+    }
+    if label_start == value.byte_len() || value.byte_get(value.byte_len() - 1) == b'-'
+        || value.byte_len() - label_start > 63 {
+        return Result::Err(
+            failure(ErrorKind::Invalid, base + value.byte_len() - 1, "invalid final domain label"),
+        )
+    }
+    Result::Ok(())
+}
+
+fn mime_limits(limits: Limits) -> mime::Limits {
+    mime::Limits {
+        max_input_bytes: limits.max_value_bytes,
+        max_parameters: 0,
+        max_value_bytes: limits.max_value_bytes,
+        max_output_bytes: limits.max_decoded_bytes,
+    }
+}
+
+fn decode_name(value: string, limits: Limits, base: isize) -> Result[string, Error] {
+    let value = value.trim();
+    if value == "" {
+        return Result::Ok("")
+    }
+    if value.byte_len() > limits.max_address_bytes {
+        return Result::Err(failure(ErrorKind::Limit, base, "display name exceeds limit"))
+    }
+    if value.byte_get(0) == b'"' {
+        if value.byte_len() < 2 || value.byte_get(value.byte_len() - 1) != b'"' {
+            return Result::Err(
+                failure(ErrorKind::Invalid, base, "unterminated quoted display name"),
+            )
+        }
+        let output: Vec[byte] = Vec::new();
+        let mut index = 1;
+        while index < value.byte_len() - 1 {
+            let byte = value.byte_get(index);
+            if byte == b'\\' {
+                index += 1;
+                if index == value.byte_len() - 1 {
+                    return Result::Err(
+                        failure(ErrorKind::Invalid, base + index, "short display-name escape"),
+                    )
+                }
+                output.push(value.byte_get(index));
+            } else if byte == b'"' {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "unescaped display-name quote"),
+                )
+            } else {
+                output.push(byte);
+            }
+            index += 1;
+        }
+        let decoded = string_from_utf8(output);
+        if !decoded.0 {
+            return Result::Err(failure(ErrorKind::Encoding, base, "invalid display-name UTF-8"))
+        }
+        if decoded.1.byte_len() > limits.max_decoded_bytes {
+            return Result::Err(
+                failure(ErrorKind::Limit, base, "decoded display name exceeds limit"),
+            )
+        }
+        return Result::Ok(decoded.1)
+    }
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if byte == b'"' || byte == b'<' || byte == b'>' || byte == b',' || byte == b';'
+            || byte == b':' {
+            return Result::Err(
+                failure(ErrorKind::Invalid, base + index, "invalid display-name punctuation"),
+            )
+        }
+    }
+    let decoded = mime::decode_header(value, mime_limits(limits)).map_err(
+        |error| failure(
+            if error.kind == mime::ErrorKind::Limit {
+                ErrorKind::Limit
+            } else {
+                ErrorKind::Encoding
+            },
+            base + error.offset,
+            error.message,
+        ),
+    )?;
+    if decoded.byte_len() > limits.max_decoded_bytes {
+        return Result::Err(failure(ErrorKind::Limit, base, "decoded display name exceeds limit"))
+    }
+    Result::Ok(decoded)
+}
+
+fn strip_comments(value: string, limits: Limits, base: isize) -> Result[string, Error] {
+    let output: Vec[byte] = Vec::new();
+    let mut depth = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if escaped {
+            if depth == 0 {
+                output.push(byte);
+            }
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' && (quoted || depth > 0) {
+            if depth == 0 {
+                output.push(byte);
+            }
+            escaped = true;
+            continue;
+        }
+        if depth > 0 {
+            if byte == b'(' {
+                depth += 1;
+                if depth > limits.max_comment_depth {
+                    return Result::Err(
+                        failure(ErrorKind::Limit, base + index, "comment depth exceeds limit"),
+                    )
+                }
+            } else if byte == b')' {
+                depth -= 1;
+            }
+            continue;
+        }
+        if byte == b'"' {
+            quoted = !quoted;
+            output.push(byte);
+        } else if !quoted && byte == b'(' {
+            depth = 1;
+            if depth > limits.max_comment_depth {
+                return Result::Err(
+                    failure(ErrorKind::Limit, base + index, "comment depth exceeds limit"),
+                )
+            }
+            output.push(b' ');
+        } else if !quoted && byte == b')' {
+            return Result::Err(failure(ErrorKind::Invalid, base + index, "unmatched comment close"))
+        } else {
+            output.push(byte);
+        }
+    }
+    if depth != 0 || quoted || escaped {
+        return Result::Err(
+            failure(ErrorKind::Invalid, base + value.byte_len(), "unfinished comment or quote"),
+        )
+    }
+    Result::Ok(string_from_utf8(output).1)
+}
+
+fn parse_mailbox(value: string, limits: Limits, base: isize) -> Result[Address, Error] {
+    let value = strip_comments(value, limits, base)?.trim();
+    if value.byte_len() == 0 {
+        return Result::Err(failure(ErrorKind::Invalid, base, "empty mailbox"))
+    }
+    if value.byte_len() > limits.max_address_bytes {
+        return Result::Err(failure(ErrorKind::Limit, base, "mailbox exceeds byte limit"))
+    }
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut angle = -1;
+    let mut close = -1;
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            quoted = !quoted;
+        } else if !quoted && byte == b'<' {
+            if angle >= 0 {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "nested address bracket"),
+                )
+            }
+            angle = index;
+        } else if !quoted && byte == b'>' {
+            if angle < 0 || close >= 0 {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "unmatched address bracket"),
+                )
+            }
+            close = index;
+        }
+    }
+    let (name, address) = if angle >= 0 {
+        if close < angle || value.byte_slice(close + 1, value.byte_len()).trim() != "" {
+            return Result::Err(failure(ErrorKind::Invalid, base, "invalid angle address suffix"))
+        };
+        (
+            decode_name(value.byte_slice(0, angle), limits, base)?,
+            value.byte_slice(angle + 1, close).trim(),
+        )
+    } else {
+        if close >= 0 {
+            return Result::Err(failure(ErrorKind::Invalid, base, "unmatched address bracket"))
+        };
+        ("", value)
+    };
+    if address.byte_len() > limits.max_address_bytes {
+        return Result::Err(failure(ErrorKind::Limit, base, "address exceeds byte limit"))
+    }
+    let mut at = -1;
+    quoted = false;
+    escaped = false;
+    for index in 0..address.byte_len() {
+        let byte = address.byte_get(index);
+        if escaped {
+            escaped = false;
+        } else if quoted && byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            quoted = !quoted;
+        } else if byte == b'@' && !quoted {
+            if at >= 0 {
+                return Result::Err(
+                    failure(ErrorKind::Invalid, base + index, "multiple address separators"),
+                )
+            }
+            at = index;
+        }
+    }
+    if at <= 0 || at + 1 >= address.byte_len() || quoted || escaped {
+        return Result::Err(failure(ErrorKind::Invalid, base, "invalid addr-spec"))
+    }
+    let local = address.byte_slice(0, at);
+    let domain = address.byte_slice(at + 1, address.byte_len());
+    validate_local(local, base)?;
+    validate_domain(domain, base + at + 1)?;
+    Result::Ok(Address { name, address, local, domain })
+}
+
+pub fn parse_address(value: string, limits: Limits) -> Result[Address, Error] {
+    limits.validate()?;
+    if value.byte_len() > limits.max_input_bytes {
+        return Result::Err(failure(ErrorKind::Limit, 0, "address input exceeds limit"))
+    }
+    if limits.max_addresses == 0 {
+        return Result::Err(failure(ErrorKind::Limit, 0, "address count exceeds limit"))
+    }
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if byte == 0 || byte == 127 || (byte < 32 && byte != b'\t') {
+            return Result::Err(failure(ErrorKind::Invalid, index, "invalid address control"))
+        }
+    }
+    parse_mailbox(value, limits, 0)
+}
+
+pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address], Error] {
+    limits.validate()?;
+    if value.byte_len() > limits.max_input_bytes {
+        return Result::Err(failure(ErrorKind::Limit, 0, "address list input exceeds limit"))
+    }
+    let output = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut comments = 0;
+    let mut angle = false;
+    let mut literal = false;
+    let mut group = false;
+    let mut after_group = false;
+    for index in 0..value.byte_len() {
+        let byte = value.byte_get(index);
+        if byte == 0 || byte == 127 || (byte < 32 && byte != b'\t') {
+            return Result::Err(failure(ErrorKind::Invalid, index, "invalid address-list control"))
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' && (quoted || comments > 0) {
+            escaped = true;
+            continue;
+        }
+        if comments > 0 {
+            if byte == b'(' {
+                comments += 1;
+                if comments > limits.max_comment_depth {
+                    return Result::Err(
+                        failure(ErrorKind::Limit, index, "comment depth exceeds limit"),
+                    )
+                }
+            } else if byte == b')' {
+                comments -= 1;
+            }
+            continue;
+        }
+        if byte == b'"' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted {
+            continue;
+        }
+        if byte == b'(' {
+            comments = 1;
+            if comments > limits.max_comment_depth {
+                return Result::Err(failure(ErrorKind::Limit, index, "comment depth exceeds limit"))
+            }
+        } else if byte == b')' {
+            return Result::Err(failure(ErrorKind::Invalid, index, "unmatched comment close"))
+        } else if byte == b'<' {
+            if angle {
+                return Result::Err(failure(ErrorKind::Invalid, index, "nested address bracket"))
+            }
+            angle = true;
+        } else if byte == b'>' {
+            if !angle {
+                return Result::Err(failure(ErrorKind::Invalid, index, "unmatched address bracket"))
+            }
+            angle = false;
+        } else if byte == b'[' {
+            if literal {
+                return Result::Err(failure(ErrorKind::Invalid, index, "nested domain literal"))
+            }
+            literal = true;
+        } else if byte == b']' {
+            if !literal {
+                return Result::Err(failure(ErrorKind::Invalid, index, "unmatched domain literal"))
+            }
+            literal = false;
+        } else if !angle && !literal && byte == b':' && !group {
+            let label = value.byte_slice(start, index).trim();
+            if label == "" || label.contains("@") || label.contains("<") {
+                return Result::Err(failure(ErrorKind::Invalid, index, "invalid group label"))
+            }
+            group = true;
+            start = index + 1;
+        } else if !angle && (byte == b',' || byte == b';') {
+            if byte == b';' && !group {
+                return Result::Err(failure(ErrorKind::Invalid, index, "unexpected group end"))
+            }
+            let segment = value.byte_slice(start, index).trim();
+            if segment != "" {
+                if output.len() >= limits.max_addresses {
+                    return Result::Err(
+                        failure(ErrorKind::Limit, index, "address count exceeds limit"),
+                    )
+                }
+                output.push(parse_mailbox(segment, limits, start)?);
+            } else if byte == b',' && !after_group {
+                return Result::Err(failure(ErrorKind::Invalid, index, "empty address-list member"))
+            }
+            after_group = byte == b';';
+            if byte == b';' {
+                group = false;
+            }
+            start = index + 1;
+        }
+    }
+    if comments != 0 || quoted || escaped || angle || literal || group {
+        return Result::Err(failure(ErrorKind::Invalid, value.byte_len(), "unfinished address list"))
+    }
+    let final_value = value.byte_slice(start, value.byte_len()).trim();
+    if final_value != "" {
+        if output.len() >= limits.max_addresses {
+            return Result::Err(
+                failure(ErrorKind::Limit, value.byte_len(), "address count exceeds limit"),
+            )
+        }
+        output.push(parse_mailbox(final_value, limits, start)?);
+    } else if output.is_empty() && !after_group {
+        return Result::Err(failure(ErrorKind::Invalid, value.byte_len(), "empty address list"))
+    } else if value.byte_len() > 0 && value.byte_get(value.byte_len() - 1) == b',' {
+        return Result::Err(
+            failure(ErrorKind::Invalid, value.byte_len() - 1, "trailing address separator"),
+        )
+    }
+    Result::Ok(output)
+}
