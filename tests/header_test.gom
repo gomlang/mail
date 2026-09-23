@@ -1,0 +1,71 @@
+package tests;
+
+use ecosystem::mail;
+use ecosystem::mail::{ErrorKind, Limits};
+use std::bytes;
+use std::testing;
+
+#[test]
+fn folded_headers_mime_words_duplicates_and_body_offset() -> () {
+    let header = "From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nTo: Carol <carol@example.test>\r\nSubject: =?UTF-8?Q?hello?=\r\n =?UTF-8?Q?_world?=\r\n\r\n";
+    let wire = bytes::Bytes::from_string(header + "body\r\n");
+    let parsed = testing::expect_ok(mail::parse_headers(wire, Limits::standard()), "headers");
+    testing::assert_eq(parsed.body_offset(), header.byte_len());
+    testing::assert_eq(parsed.len(), 4);
+    testing::assert_eq(parsed.values("to").len(), 2);
+    testing::assert_eq(
+        testing::expect_some(
+            testing::expect_ok(parsed.decoded("Subject", Limits::standard()), "subject"),
+            "subject",
+        ),
+        "hello world",
+    );
+    let addresses = testing::expect_ok(parsed.addresses("To", Limits::standard()), "recipients");
+    testing::assert_eq(addresses.len(), 2);
+    testing::assert_eq(addresses[0].name, "Bob");
+    testing::assert_eq(addresses[1].address, "carol@example.test");
+    testing::assert_none(
+        testing::expect_ok(parsed.decoded("missing", Limits::standard()), "missing"),
+    );
+    testing::assert_eq(
+        testing::expect_ok(
+            mail::decode_header_value("=?ISO-8859-1?Q?caf=E9?=", Limits::standard()),
+            "MIME Latin-1",
+        ),
+        "café",
+    );
+}
+
+#[test]
+fn malformed_headers_and_limits_fail_recoverably() -> () {
+    for source in["Subject: x\n\n", " Bad: value\r\n\r\n", "Subject: x\r\n", "Bad Name: x\r\n\r\n"] {
+        let result = mail::parse_headers(bytes::Bytes::from_string(source), Limits::standard());
+        testing::assert_eq(testing::expect_err(result, "bad header").kind, ErrorKind::Header);
+    }
+    let binary_body = bytes::Bytes::from_vec(b"Subject: x\r\n\r\nextra");
+    binary_body.push(0);
+    testing::assert_ok(mail::parse_headers(binary_body, Limits::standard()));
+    let short = Limits { max_header_bytes: 12, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(
+            mail::parse_headers(bytes::Bytes::from_vec(b"Subject: too long\r\n\r\n"), short),
+            "header bound",
+        ).kind,
+        ErrorKind::Limit,
+    );
+    let decoded = Limits { max_decoded_bytes: 2, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(
+            mail::decode_header_value("=?UTF-8?Q?hello?=", decoded),
+            "decoded bound",
+        ).kind,
+        ErrorKind::Limit,
+    );
+    testing::assert_eq(
+        testing::expect_err(
+            mail::decode_header_value("=?UTF-8?Q?broken", Limits::standard()),
+            "malformed MIME",
+        ).kind,
+        ErrorKind::Encoding,
+    );
+}

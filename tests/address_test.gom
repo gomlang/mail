@@ -1,0 +1,122 @@
+package tests;
+
+use ecosystem::mail;
+use ecosystem::mail::{ErrorKind, Limits};
+use std::testing;
+
+#[test]
+fn mailbox_forms_and_encoded_display_names() -> () {
+    let limits = Limits::standard();
+    let bare = testing::expect_ok(
+        mail::parse_address("alice.smith+tag@example.test", limits),
+        "bare",
+    );
+    testing::assert_eq(bare.name, "");
+    testing::assert_eq(bare.local, "alice.smith+tag");
+    testing::assert_eq(bare.domain, "example.test");
+    let named = testing::expect_ok(
+        mail::parse_address("Alice (team) <alice@example.test>", limits),
+        "named",
+    );
+    testing::assert_eq(named.name, "Alice");
+    testing::assert_eq(named.address, "alice@example.test");
+    let quoted = testing::expect_ok(
+        mail::parse_address("\"Doe, Jane\" <\"a,b\"@[IPv6:2001:db8::1]>", limits),
+        "quoted",
+    );
+    testing::assert_eq(quoted.name, "Doe, Jane");
+    testing::assert_eq(quoted.local, "\"a,b\"");
+    testing::assert_eq(quoted.domain, "[IPv6:2001:db8::1]");
+    testing::assert_eq(
+        testing::expect_ok(
+            mail::parse_address_list("\"a,b\"@[IPv6:2001:db8::1]", limits),
+            "literal in list",
+        )[0].domain,
+        "[IPv6:2001:db8::1]",
+    );
+    let encoded = testing::expect_ok(
+        mail::parse_address("=?UTF-8?B?5Lit5paH?= <zh@example.test>", limits),
+        "encoded name",
+    );
+    testing::assert_eq(encoded.name, "中文");
+    let international = testing::expect_ok(
+        mail::parse_address("中文 <zh@example.test>", limits),
+        "UTF-8 name",
+    );
+    testing::assert_eq(international.name, "中文");
+}
+
+#[test]
+fn address_lists_groups_and_boundaries() -> () {
+    let limits = Limits::standard();
+    let list = testing::expect_ok(
+        mail::parse_address_list(
+            "Friends: Alice <a@example.test>, \"B, C\" <b@example.test>; , c@example.test",
+            limits,
+        ),
+        "group and mailbox",
+    );
+    testing::assert_eq(list.len(), 3);
+    testing::assert_eq(list[1].name, "B, C");
+    testing::assert_eq(list[2].address, "c@example.test");
+    testing::assert_eq(
+        testing::expect_ok(mail::parse_address_list("Undisclosed:;", limits), "empty group").len(),
+        0,
+    );
+    let one = Limits { max_addresses: 1, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(mail::parse_address_list("a@b.test,c@d.test", one), "count").kind,
+        ErrorKind::Limit,
+    );
+    let short = Limits { max_address_bytes: 5, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(mail::parse_address("a@b.test", short), "address length").kind,
+        ErrorKind::Limit,
+    );
+    let shallow = Limits { max_comment_depth: 1, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(
+            mail::parse_address("A (nested (comment)) <a@b.test>", shallow),
+            "depth",
+        ).kind,
+        ErrorKind::Limit,
+    );
+}
+
+#[test]
+fn malformed_mailboxes_return_offsets_and_errors() -> () {
+    for source in[
+        "",
+        "a..b@example.test",
+        "a@-example.test",
+        "a@example..test",
+        "a@example.test,",
+        "A <a@example.test",
+        "A <a@example.test> junk",
+        "a@example.test (unfinished",
+        "a@exämple.test",
+        "a@example.test\r\nBcc: x@y.test",
+        "a@example.test, ,b@example.test",
+        "Friends: a@b.test",
+    ] {
+        let error = testing::expect_err(
+            mail::parse_address_list(source, Limits::standard()),
+            "bad mailbox",
+        );
+        testing::assert_eq(error.kind, ErrorKind::Invalid);
+        testing::assert(error.offset >= 0);
+        testing::assert(error.message.byte_len() > 0);
+    }
+    let error = testing::expect_err(
+        mail::parse_address("=?UTF-8?Q?broken <a@example.test>", Limits::standard()),
+        "bad encoded name",
+    );
+    testing::assert_eq(error.kind, ErrorKind::Encoding);
+    testing::assert_eq(
+        testing::expect_err(
+            mail::parse_address("a@example.test (hidden\r\nBcc: x@y.test)", Limits::standard()),
+            "hidden header injection",
+        ).kind,
+        ErrorKind::Invalid,
+    );
+}
