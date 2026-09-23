@@ -1,0 +1,28 @@
+package main;
+
+use ecosystem::mail;
+use std::bytes;
+use std::testing;
+
+pub fn exercise() -> Result[(), mail::Error] {
+    let wire = bytes::Bytes::from_vec(
+        b"From: =?UTF-8?B?5Lit5paH?= <zh@example.test>\r\nTo: Alice <alice@example.test>, bob@example.test\r\nSubject: =?UTF-8?Q?hello_world?=\r\n\r\nbody",
+    );
+    let headers = mail::parse_headers(wire, mail::Limits::standard())?;
+    let from = headers.addresses("From", mail::Limits::standard())?;
+    testing::assert_eq(from.len(), 1);
+    testing::assert_eq(from[0].name, "中文");
+    let recipients = headers.addresses("To", mail::Limits::standard())?;
+    testing::assert_eq(recipients.len(), 2);
+    testing::assert_eq(recipients[1].domain, "example.test");
+    testing::assert_eq(
+        testing::expect_some(headers.decoded("Subject", mail::Limits::standard())?, "subject"),
+        "hello world",
+    );
+    Result::Ok(())
+}
+
+fn main() -> () {
+    testing::assert_ok(exercise());
+    println("mail consumer: bounded headers and addresses passed");
+}

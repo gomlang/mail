@@ -1,0 +1,5 @@
+[module]
+path = "ecosystem::consumers::mail"
+
+[dependencies]
+"ecosystem::mail" = "0.1.0"
