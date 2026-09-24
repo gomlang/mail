@@ -1,0 +1,9 @@
+package tests;
+
+use ecosystem::consumers::mail;
+use std::testing;
+
+#[test]
+fn consumer_uses_public_mail_contract() -> () {
+    testing::assert_ok(mail::exercise());
+}
