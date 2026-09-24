@@ -32,5 +32,5 @@ interpret `Received`/`Date`, or validate delivery policy.
 
 The address grammar is a bounded modern subset of [RFC 5322](https://www.rfc-editor.org/rfc/rfc5322.html),
 with display-name decoding from [RFC 2047](https://www.rfc-editor.org/rfc/rfc2047.html).
-Run `just ecosystem-test mail` from the repository root to verify the library
+Run `(cd ../verification && just ecosystem-test mail)` from this library repository to verify the library
 and its independently resolved consumer.
