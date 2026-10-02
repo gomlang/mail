@@ -177,7 +177,9 @@ fn decode_name(value: string, limits: Limits, base: isize) -> Result[string, Err
     for index in 0..value.byte_len() {
         let byte = value.byte_get(index);
         if byte == b'"' || byte == b'<' || byte == b'>' || byte == b',' || byte == b';'
-            || byte == b':' {
+            || byte == b':'
+            || byte == b'['
+            || byte == b']' {
             return Result::Err(
                 failure(ErrorKind::Invalid, base + index, "invalid display-name punctuation"),
             )
