@@ -23,6 +23,8 @@ fn address_lists_require_separators_after_groups_and_before_end() -> () {
 fn group_boundaries_allow_comments_empty_groups_and_adjacent_mailboxes() -> () {
     for (value, count) in[
         ("G:; (tail)", 0),
+        ("\"\":;", 0),
+        ("\"\" (comment):;", 0),
         ("G: (empty);", 0),
         ("G:;, H:;", 0),
         ("G:; (tail), a@b.test", 1),
@@ -41,4 +43,11 @@ fn group_boundaries_allow_comments_empty_groups_and_adjacent_mailboxes() -> () {
     testing::assert(
         mail::parse_address_list("=?UTF-8?Q?broken:;", mail::Limits::standard()).is_err(),
     );
+}
+
+#[test]
+fn absent_or_comment_only_group_labels_are_invalid() -> () {
+    for value in[":;", " (comment):;"] {
+        testing::assert(mail::parse_address_list(value, mail::Limits::standard()).is_err());
+    }
 }
