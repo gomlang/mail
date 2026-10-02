@@ -14,7 +14,11 @@ an empty group. Group labels use the same display-name validation as mailboxes; 
 name is valid, while an absent or comment-only label is not. `Address` exposes the decoded
 display `name`, original validated `address`, `local` and `domain`. The local
 part supports dot atoms and quoted strings; the domain supports DNS-style ASCII
-labels and bracketed literals. Display names may be UTF-8, quoted strings or
+labels and bracketed literals. Domain literals preserve RFC 5322 `dtext`
+punctuation, including commas, semicolons, colons, parentheses, quotes, angle
+brackets and `@`, without interpreting it as list, comment or mailbox syntax.
+Brackets, backslashes, controls, whitespace and non-ASCII literal contents remain
+unsupported; the library does not interpret a literal as an IP address. Display names may be UTF-8, quoted strings or
 MIME encoded words. Comments and horizontal whitespace are supported around
 mailboxes; comments inside an addr-spec and obsolete route syntax are rejected.
 Internationalized local parts and domains need an explicit application policy

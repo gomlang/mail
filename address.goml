@@ -204,9 +204,22 @@ fn strip_comments(value: string, limits: Limits, base: isize) -> Result[string, 
     let output: Vec[byte] = Vec::new();
     let mut depth = 0;
     let mut quoted = false;
+    let mut literal = false;
     let mut escaped = false;
     for index in 0..value.byte_len() {
         let byte = value.byte_get(index);
+        if literal {
+            output.push(byte);
+            if byte == b']' {
+                literal = false;
+            }
+            continue;
+        }
+        if !quoted && depth == 0 && byte == b'[' {
+            literal = true;
+            output.push(byte);
+            continue;
+        }
         if escaped {
             if depth == 0 {
                 output.push(byte);
@@ -268,11 +281,22 @@ fn parse_mailbox(value: string, limits: Limits, base: isize) -> Result[Address, 
         return Result::Err(failure(ErrorKind::Limit, base, "mailbox exceeds byte limit"))
     }
     let mut quoted = false;
+    let mut literal = false;
     let mut escaped = false;
     let mut angle = -1;
     let mut close = -1;
     for index in 0..value.byte_len() {
         let byte = value.byte_get(index);
+        if literal {
+            if byte == b']' {
+                literal = false;
+            }
+            continue;
+        }
+        if !quoted && byte == b'[' {
+            literal = true;
+            continue;
+        }
         if escaped {
             escaped = false;
             continue;
@@ -316,9 +340,20 @@ fn parse_mailbox(value: string, limits: Limits, base: isize) -> Result[Address, 
     }
     let mut at = -1;
     quoted = false;
+    literal = false;
     escaped = false;
     for index in 0..address.byte_len() {
         let byte = address.byte_get(index);
+        if literal {
+            if byte == b']' {
+                literal = false;
+            }
+            continue;
+        }
+        if !quoted && byte == b'[' {
+            literal = true;
+            continue;
+        }
         if escaped {
             escaped = false;
         } else if quoted && byte == b'\\' {
@@ -380,6 +415,14 @@ pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address],
         let byte = value.byte_get(index);
         if byte == 0 || byte == 127 || (byte < 32 && byte != b'\t') {
             return Result::Err(failure(ErrorKind::Invalid, index, "invalid address-list control"))
+        }
+        if literal {
+            if byte == b']' {
+                literal = false;
+            } else if byte == b'[' {
+                return Result::Err(failure(ErrorKind::Invalid, index, "nested domain literal"))
+            }
+            continue;
         }
         if escaped {
             escaped = false;
