@@ -1,6 +1,6 @@
 package tests;
 
-use ecosystem::consumers::mail;
+use ecosystem::mail::examples::basic as mail;
 use std::testing;
 
 #[test]

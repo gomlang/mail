@@ -33,4 +33,16 @@ interpret `Received`/`Date`, or validate delivery policy.
 The address grammar is a bounded modern subset of [RFC 5322](https://www.rfc-editor.org/rfc/rfc5322.html),
 with display-name decoding from [RFC 2047](https://www.rfc-editor.org/rfc/rfc2047.html).
 Run `(cd ../verification && just ecosystem-test mail)` from this library repository to verify the library
-and its independently resolved consumer.
+and its example, including independent downstream verification.
+
+## Development and examples
+
+Requires GoML 0.1.55 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+
+```sh
+goml run --example basic
+goml test
+goml verify --timeout 300s
+```
+
+`goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test mail)` also retains the library-specific smoke and compatibility checks.
