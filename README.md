@@ -10,7 +10,8 @@ SMTP, decode message bodies, or claim full support for obsolete RFC 5322 syntax.
 group members into the returned address list. A completed group requires a comma
 before another address or group; trailing commas, including those followed by
 whitespace or comments, are rejected. Comments may follow the final member or
-an empty group. Group labels use the same display-name validation as mailboxes. `Address` exposes the decoded
+an empty group. Group labels use the same display-name validation as mailboxes; an empty quoted
+name is valid, while an absent or comment-only label is not. `Address` exposes the decoded
 display `name`, original validated `address`, `local` and `domain`. The local
 part supports dot atoms and quoted strings; the domain supports DNS-style ASCII
 labels and bracketed literals. Display names may be UTF-8, quoted strings or

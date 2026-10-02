@@ -440,14 +440,11 @@ pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address],
             }
             literal = false;
         } else if !angle && !literal && byte == b':' && !group {
-            let label = value.byte_slice(start, index).trim();
+            let label = strip_comments(value.byte_slice(start, index), limits, start)?.trim();
             if label == "" || label.contains("@") || label.contains("<") {
                 return Result::Err(failure(ErrorKind::Invalid, index, "invalid group label"))
             }
-            let name = decode_name(strip_comments(label, limits, start)?, limits, start)?;
-            if name == "" {
-                return Result::Err(failure(ErrorKind::Invalid, index, "empty group label"))
-            }
+            let _ = decode_name(label, limits, start)?;
             group = true;
             separator_pending = false;
             start = index + 1;
