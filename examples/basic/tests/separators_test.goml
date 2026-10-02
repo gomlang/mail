@@ -1,0 +1,17 @@
+package tests;
+
+use ecosystem::mail;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn downstream_header_address_lists_reject_omitted_group_comma() -> () {
+    let headers = testing::expect_ok(
+        mail::parse_headers(
+            bytes::Bytes::from_string("To: Team:a@b.test; b@c.test\r\n\r\n"),
+            mail::Limits::standard(),
+        ),
+        "headers",
+    );
+    testing::assert(headers.addresses("To", mail::Limits::standard()).is_err());
+}

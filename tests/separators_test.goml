@@ -1,0 +1,44 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn address_lists_require_separators_after_groups_and_before_end() -> () {
+    for value in[
+        "a@b.test, ",
+        "a@b.test, (trailing)",
+        "G:a@b.test; b@c.test",
+        "G:; H:;",
+        "G:; (comment) b@c.test",
+        "G:a@b.test,;",
+        "G:a@b.test, (trailing);",
+        "G:;,,a@b.test",
+    ] {
+        testing::assert(mail::parse_address_list(value, mail::Limits::standard()).is_err());
+    }
+}
+
+#[test]
+fn group_boundaries_allow_comments_empty_groups_and_adjacent_mailboxes() -> () {
+    for (value, count) in[
+        ("G:; (tail)", 0),
+        ("G: (empty);", 0),
+        ("G:;, H:;", 0),
+        ("G:; (tail), a@b.test", 1),
+        ("G:a@b.test; (tail), b@c.test", 2),
+        ("a@b.test (tail)", 1),
+        ("\"G, H\": a@b.test;", 1),
+    ] {
+        testing::assert_eq(
+            testing::expect_ok(
+                mail::parse_address_list(value, mail::Limits::standard()),
+                "valid list",
+            ).len(),
+            count,
+        );
+    }
+    testing::assert(
+        mail::parse_address_list("=?UTF-8?Q?broken:;", mail::Limits::standard()).is_err(),
+    );
+}
