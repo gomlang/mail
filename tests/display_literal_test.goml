@@ -1,0 +1,37 @@
+package tests;
+
+use ecosystem::mail::{parse_address, parse_address_list, Limits};
+use std::testing;
+
+#[test]
+fn unquoted_display_brackets_cannot_shield_comment_syntax() -> () {
+    for source in[
+        "Name [)] <a@b.test>",
+        "Name [(] <a@b.test>",
+        "Name@[)] <a@b.test>",
+        "Name [dtext] <a@b.test>",
+    ] {
+        testing::assert_err(parse_address(source, Limits::standard()));
+        testing::assert_err(parse_address_list(source, Limits::standard()));
+    }
+    testing::assert_err(parse_address_list("Name [)]:a@b.test;", Limits::standard()));
+    for source in["\"Name [)]\" <a@[x)y]>", "=?UTF-8?Q?Name_=5B=29=5D?= <a@[x)y]>"] {
+        let address = testing::expect_ok(
+            parse_address(source, Limits::standard()),
+            "quoted or encoded display",
+        );
+        testing::assert_eq(address.name, "Name [)]");
+        testing::assert_eq(address.domain, "[x)y]");
+        testing::assert_eq(
+            testing::expect_ok(parse_address_list(source, Limits::standard()), "list").len(),
+            1,
+        );
+    }
+    testing::assert_eq(
+        testing::expect_ok(
+            parse_address_list("\"Name [)]\":a@[x)y];", Limits::standard()),
+            "quoted group",
+        ).len(),
+        1,
+    );
+}

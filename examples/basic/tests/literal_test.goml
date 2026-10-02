@@ -20,3 +20,14 @@ fn downstream_header_literals_do_not_create_extra_recipients() -> () {
     testing::assert_eq(addresses.len(), 2);
     testing::assert_eq(addresses[0].domain, "[x,y;z]");
 }
+
+#[test]
+fn downstream_display_brackets_require_quoting() -> () {
+    testing::assert_err(mail::parse_address_list("Name [)] <a@b.test>", mail::Limits::standard()));
+    let addresses = testing::expect_ok(
+        mail::parse_address_list("\"Name [)]\" <a@[x)y]>", mail::Limits::standard()),
+        "quoted display with domain literal",
+    );
+    testing::assert_eq(addresses[0].name, "Name [)]");
+    testing::assert_eq(addresses[0].domain, "[x)y]");
+}
