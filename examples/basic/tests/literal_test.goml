@@ -1,0 +1,22 @@
+package tests;
+
+use ecosystem::mail;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn downstream_header_literals_do_not_create_extra_recipients() -> () {
+    let headers = testing::expect_ok(
+        mail::parse_headers(
+            bytes::Bytes::from_string("To: a@[x,y;z], b@example.test\r\n\r\n"),
+            mail::Limits::standard(),
+        ),
+        "headers",
+    );
+    let addresses = testing::expect_ok(
+        headers.addresses("To", mail::Limits::standard()),
+        "recipients",
+    );
+    testing::assert_eq(addresses.len(), 2);
+    testing::assert_eq(addresses[0].domain, "[x,y;z]");
+}

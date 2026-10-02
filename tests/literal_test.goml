@@ -1,0 +1,41 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn domain_literal_punctuation_survives_all_mailbox_and_list_scanners() -> () {
+    for domain in["[x,y;z]", "[x@y]", "[x(y)]", "[x\"y]", "[x<y>z]", "[IPv6:2001:db8::1]"] {
+        let address = "a@" + domain;
+        for source in[address, "Name <" + address + ">", "(before) " + address + " (after)"] {
+            let parsed = testing::expect_ok(
+                mail::parse_address(source, mail::Limits::standard()),
+                "mailbox",
+            );
+            testing::assert_eq(parsed.address, address);
+            testing::assert_eq(parsed.domain, domain);
+            let list = testing::expect_ok(
+                mail::parse_address_list(
+                    "Group: " + source + ", b@c.test;",
+                    mail::Limits::standard(),
+                ),
+                "group",
+            );
+            testing::assert_eq(list.len(), 2);
+            testing::assert_eq(list[0].domain, domain);
+        }
+    }
+    for source in[
+        "a@[x[y]]",
+        "a@[x\\y]",
+        "a@[x y]",
+        "a@[x\ty]",
+        "a@[é]",
+        "a@[x",
+        "a@[x]junk",
+        "a@[x]@y",
+    ] {
+        testing::assert(mail::parse_address(source, mail::Limits::standard()).is_err());
+        testing::assert(mail::parse_address_list(source, mail::Limits::standard()).is_err());
+    }
+}
