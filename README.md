@@ -25,6 +25,16 @@ mailboxes; comments inside an addr-spec and obsolete route syntax are rejected.
 Internationalized local parts and domains need an explicit application policy
 and are outside this module.
 
+`parse_address_items(value, limits)` preserves address-list structure as ordered
+`AddressItem::Mailbox(Address)` and `AddressItem::Group(name, members)` entries.
+Group names are decoded using the same quoted-string/MIME rules as display names;
+empty groups and explicitly empty quoted names are retained. Group members remain
+ordered, and nesting remains invalid. The shared parser retains all syntax and
+address limits of `parse_address_list`. For this structured API, `max_addresses`
+also independently caps the number of groups, including empty groups. The older
+flattening API keeps its existing empty-group and address-count behavior. This
+model preserves semantic structure, not comments, whitespace or original quoting.
+
 `parse_headers` accepts a byte buffer containing a CRLF-terminated header block
 and optional body. Its `Headers` result preserves duplicate fields in order,
 offers `values(name)`, `decoded(name, limits)` and `addresses(name, limits)`, and

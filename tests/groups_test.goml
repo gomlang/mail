@@ -1,0 +1,111 @@
+package tests;
+
+use ecosystem::mail;
+use ecosystem::mail::{AddressItem, ErrorKind, Limits};
+use std::testing;
+
+#[test]
+fn preserves_order_group_names_members_and_empty_groups() -> () {
+    let input = "first@example.test, =?UTF-8?B?5Lit5paH?=: Alice <a@example.test>, b@[x,y;:()<>@];, \"\": (empty);, last@example.test";
+    let items = testing::expect_ok(mail::parse_address_items(input, Limits::standard()), "items");
+    testing::assert_eq(items.len(), 4);
+    match items[0] {
+        AddressItem::Mailbox(address) => testing::assert_eq(address.local, "first"),
+        _ => testing::fail("first mailbox"),
+    }
+    match items[1] {
+        AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "中文");
+            testing::assert_eq(members.len(), 2);
+            testing::assert_eq(members[0].name, "Alice");
+            testing::assert_eq(members[1].domain, "[x,y;:()<>@]");
+        },
+        _ => testing::fail("named group"),
+    }
+    match items[2] {
+        AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "");
+            testing::assert_eq(members.len(), 0);
+        },
+        _ => testing::fail("empty group"),
+    }
+    match items[3] {
+        AddressItem::Mailbox(address) => testing::assert_eq(address.local, "last"),
+        _ => testing::fail("last mailbox"),
+    }
+    let flat = testing::expect_ok(mail::parse_address_list(input, Limits::standard()), "flat");
+    testing::assert_eq(flat.len(), 4);
+    testing::assert_eq(flat[0].local, "first");
+    testing::assert_eq(flat[1].local, "a");
+    testing::assert_eq(flat[2].local, "b");
+    testing::assert_eq(flat[3].local, "last");
+}
+
+#[test]
+fn structure_has_separate_group_and_total_mailbox_budgets() -> () {
+    let one = Limits { max_addresses: 1, ..Limits::standard() };
+    testing::assert_ok(mail::parse_address_items("One:a@b;", one));
+    testing::assert_ok(mail::parse_address_items("One:;, a@b", one));
+    for input in["One:a@b,c@d;", "One:a@b;, c@d", "One:;, Two:;"] {
+        testing::assert_eq(
+            testing::expect_err(mail::parse_address_items(input, one), "limit").kind,
+            ErrorKind::Limit,
+        );
+    }
+    let zero = Limits { max_addresses: 0, ..Limits::standard() };
+    testing::assert_ok(mail::parse_address_list("One:;, Two:;", zero));
+    testing::assert_err(mail::parse_address_items("One:;", zero));
+    let small = Limits { max_decoded_bytes: 2, ..Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(mail::parse_address_items("Long:;", small), "name budget").kind,
+        ErrorKind::Limit,
+    );
+    testing::assert_err(
+        mail::parse_address_items("One:;", Limits { max_input_bytes: 4, ..Limits::standard() }),
+    );
+}
+
+#[test]
+fn structure_reuses_list_syntax_validation() -> () {
+    for input in[
+        "",
+        ":;",
+        "(comment):;",
+        "Outer: Inner:a@b;;",
+        "One:; Two:;",
+        "One:a@b,;",
+        "One:;,",
+        "One:; (x), (y)",
+        "One:a@b",
+        "One:\r\n;",
+        "One:(unclosed;",
+    ] {
+        let old = testing::expect_err(
+            mail::parse_address_list(input, Limits::standard()),
+            "old rejects",
+        );
+        let new = testing::expect_err(
+            mail::parse_address_items(input, Limits::standard()),
+            "new rejects",
+        );
+        testing::assert_eq(new.kind, old.kind);
+        testing::assert_eq(new.offset, old.offset);
+    }
+    let items = testing::expect_ok(
+        mail::parse_address_items("A:a@b;, B:c@d;", Limits::standard()),
+        "groups",
+    );
+    match items[0] {
+        AddressItem::Group(_, members) => {
+            members.clear();
+        },
+        _ => testing::fail("group"),
+    }
+    match items[1] {
+        AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "B");
+            testing::assert_eq(members.len(), 1);
+        },
+        _ => testing::fail("group"),
+    }
+}

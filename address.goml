@@ -399,11 +399,37 @@ pub fn parse_address(value: string, limits: Limits) -> Result[Address, Error] {
 }
 
 pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address], Error] {
+    let output = Vec::new();
+    for item in parse_list(value, limits, false)? {
+        match item {
+            AddressItem::Mailbox(address) => output.push(address),
+            AddressItem::Group(_, members) => {
+                for address in members {
+                    output.push(address);
+                }
+            },
+        }
+    }
+    Result::Ok(output)
+}
+
+pub fn parse_address_items(value: string, limits: Limits) -> Result[Vec[AddressItem], Error] {
+    parse_list(value, limits, true)
+}
+
+fn parse_list(value: string, limits: Limits, preserve_groups: bool) -> Result[
+    Vec[AddressItem],
+    Error,
+] {
     limits.validate()?;
     if value.byte_len() > limits.max_input_bytes {
         return Result::Err(failure(ErrorKind::Limit, 0, "address list input exceeds limit"))
     }
     let output = Vec::new();
+    let mut address_count = 0;
+    let mut group_count = 0;
+    let mut group_name = "";
+    let mut group_members: Vec[Address] = Vec::new();
     let mut start = 0;
     let mut quoted = false;
     let mut escaped = false;
@@ -489,7 +515,16 @@ pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address],
             if label == "" || label.contains("@") || label.contains("<") {
                 return Result::Err(failure(ErrorKind::Invalid, index, "invalid group label"))
             }
-            let _ = decode_name(label, limits, start)?;
+            group_name = decode_name(label, limits, start)?;
+            if preserve_groups {
+                if group_count >= limits.max_addresses {
+                    return Result::Err(
+                        failure(ErrorKind::Limit, index, "group count exceeds limit"),
+                    )
+                }
+                group_count += 1;
+                group_members = Vec::new();
+            }
             group = true;
             separator_pending = false;
             start = index + 1;
@@ -500,18 +535,27 @@ pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address],
             let segment = value.byte_slice(start, index).trim();
             let content = strip_comments(segment, limits, start)?.trim();
             if content != "" {
-                if output.len() >= limits.max_addresses {
+                if address_count >= limits.max_addresses {
                     return Result::Err(
                         failure(ErrorKind::Limit, index, "address count exceeds limit"),
                     )
                 }
-                output.push(parse_mailbox(segment, limits, start)?);
+                let address = parse_mailbox(segment, limits, start)?;
+                address_count += 1;
+                if group && preserve_groups {
+                    group_members.push(address);
+                } else {
+                    output.push(AddressItem::Mailbox(address));
+                }
             } else if (byte == b',' && !after_group) || (byte == b';' && separator_pending) {
                 return Result::Err(failure(ErrorKind::Invalid, index, "empty address-list member"))
             }
             after_group = byte == b';';
             separator_pending = byte == b',';
             if byte == b';' {
+                if preserve_groups {
+                    output.push(AddressItem::Group(group_name, group_members));
+                }
                 group = false;
             }
             start = index + 1;
@@ -523,13 +567,13 @@ pub fn parse_address_list(value: string, limits: Limits) -> Result[Vec[Address],
     let final_value = value.byte_slice(start, value.byte_len()).trim();
     let final_content = strip_comments(final_value, limits, start)?.trim();
     if final_content != "" {
-        if output.len() >= limits.max_addresses {
+        if address_count >= limits.max_addresses {
             return Result::Err(
                 failure(ErrorKind::Limit, value.byte_len(), "address count exceeds limit"),
             )
         }
-        output.push(parse_mailbox(final_value, limits, start)?);
-    } else if output.is_empty() && !after_group {
+        output.push(AddressItem::Mailbox(parse_mailbox(final_value, limits, start)?));
+    } else if address_count == 0 && !after_group {
         return Result::Err(failure(ErrorKind::Invalid, value.byte_len(), "empty address list"))
     } else if separator_pending {
         return Result::Err(

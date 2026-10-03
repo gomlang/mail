@@ -1,0 +1,37 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn consumer_preserves_delivery_groups_without_changing_flattening() -> () {
+    let source = "\"Team, A\": one@example.test, two@example.test;, Undisclosed:;, last@example.test";
+    let items = testing::expect_ok(
+        mail::parse_address_items(source, mail::Limits::standard()),
+        "structured",
+    );
+    testing::assert_eq(items.len(), 3);
+    let delivered = Vec::new();
+    let groups = Vec::new();
+    for item in items {
+        match item {
+            mail::AddressItem::Mailbox(address) => delivered.push(address.address),
+            mail::AddressItem::Group(name, members) => {
+                groups.push((name, members.len()));
+                for address in members {
+                    delivered.push(address.address);
+                }
+            },
+        }
+    }
+    testing::assert(groups[0] == ("Team, A", 2));
+    testing::assert(groups[1] == ("Undisclosed", 0));
+    let flattened = testing::expect_ok(
+        mail::parse_address_list(source, mail::Limits::standard()),
+        "flat",
+    );
+    testing::assert_eq(flattened.len(), delivered.len());
+    for index in 0..delivered.len() {
+        testing::assert_eq(delivered[index], flattened[index].address);
+    }
+}

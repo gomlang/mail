@@ -79,6 +79,11 @@ pub struct Address {
     pub domain: string,
 }
 
+pub enum AddressItem {
+    Mailbox(Address),
+    Group(string, Vec[Address]),
+}
+
 pub struct Field {
     pub name: string,
     pub value: string,
