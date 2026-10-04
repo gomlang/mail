@@ -47,6 +47,11 @@ offers `values(name)`, `decoded(name, limits)` and `addresses(name, limits)`, an
 reports `body_offset()` into the supplied buffer. Header values must be UTF-8;
 binary bodies remain untouched. MIME encoded-word decoding is explicit through
 `decoded` or `decode_header_value`.
+Unfolding removes only the CRLF before a continuation, preserving spaces and
+tabs inside the resulting value, including quoted parameter values and local
+parts. Leading and trailing spaces/tabs are trimmed once around the complete
+unfolded field; its remaining bytes count toward `max_value_bytes`. Adjacent
+MIME encoded words still discard intervening whitespace when explicitly decoded.
 
 `Limits::standard()` caps total input at 1 MiB, an address at 4 KiB, addresses
 at 128, comment depth at 8, a physical header line at 998 bytes, the header

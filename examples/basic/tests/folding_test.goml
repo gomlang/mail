@@ -1,0 +1,55 @@
+package tests;
+
+use ecosystem::mail;
+use ecosystem::mime;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn folded_headers_preserve_parameter_and_recipient_values_across_duplicates() -> () {
+    let header = "Content-Type: text/plain; name=\"a \r\n \tb.txt\"\r\nTo: \"team \r\n \tname\": \"a \r\n \tb\"@example.test;\r\nTo: other@example.test\r\n\r\n";
+    let wire = bytes::Bytes::from_string(header);
+    wire.push(255);
+    wire.push(0);
+    let limits = mail::Limits::standard();
+    let fields = testing::expect_ok(mail::parse_headers(wire, limits), "folded headers");
+    testing::assert_eq(fields.body_offset(), header.byte_len());
+    let media = testing::expect_ok(
+        mime::parse_media_type(fields.values("content-type")[0], mime::Limits::standard()),
+        "filename parameter",
+    );
+    testing::assert_eq(testing::expect_some(media.parameter("name"), "name"), "a  \tb.txt");
+    let formatted = testing::expect_ok(
+        mime::format_media_type(media, mime::Limits::standard()),
+        "format",
+    );
+    let reparsed = testing::expect_ok(
+        mime::parse_media_type(formatted, mime::Limits::standard()),
+        "reparse",
+    );
+    testing::assert_eq(
+        testing::expect_some(reparsed.parameter("name"), "reparsed name"),
+        "a  \tb.txt",
+    );
+    let values = fields.values("to");
+    testing::assert_eq(values.len(), 2);
+    let structured = testing::expect_ok(mail::parse_address_items(values[0], limits), "group");
+    match structured[0] {
+        mail::AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "team  \tname");
+            testing::assert_eq(members[0].local, "\"a  \tb\"");
+        },
+        _ => testing::fail("expected group"),
+    }
+    let addresses = testing::expect_ok(fields.addresses("TO", limits), "all recipients");
+    testing::assert_eq(addresses.len(), 2);
+    testing::assert_eq(addresses[0].address, "\"a  \tb\"@example.test");
+    testing::assert_eq(addresses[1].address, "other@example.test");
+    testing::assert_eq(
+        testing::expect_err(
+            fields.addresses("to", mail::Limits { max_addresses: 1, ..limits }),
+            "combined budget",
+        ).kind,
+        mail::ErrorKind::Limit,
+    );
+}

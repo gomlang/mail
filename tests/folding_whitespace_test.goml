@@ -1,0 +1,97 @@
+package tests;
+
+use ecosystem::mail;
+use ecosystem::mime;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn folded_quoted_values_preserve_every_space_and_tab() -> () {
+    let wire = "Content-Type: text/plain; name=\"a \r\n \tb.txt\"\r\nTo: \"a \r\n \tb\"@example.test\r\n\r\nbody";
+    let headers = testing::expect_ok(
+        mail::parse_headers(bytes::Bytes::from_string(wire), mail::Limits::standard()),
+        "folded quoted fields",
+    );
+    let media = testing::expect_ok(
+        mime::parse_media_type(headers.values("content-type")[0], mime::Limits::standard()),
+        "folded media type",
+    );
+    testing::assert_eq(testing::expect_some(media.parameter("name"), "filename"), "a  \tb.txt");
+    let recipients = testing::expect_ok(
+        headers.addresses("to", mail::Limits::standard()),
+        "address",
+    );
+    testing::assert_eq(recipients[0].local, "\"a  \tb\"");
+    testing::assert_eq(recipients[0].address, "\"a  \tb\"@example.test");
+    testing::assert_eq(headers.body_offset(), wire.byte_len() - 4);
+}
+
+#[test]
+fn repeated_folds_preserve_internal_whitespace_and_encoded_word_rules() -> () {
+    let wire = "Subject: first \t\r\n \t\r\n\t second\r\nSubject: =?UTF-8?Q?a?= \t\r\n \t\r\n\t=?UTF-8?Q?b?=\r\nX-Empty: \r\n \t\r\n\r\n";
+    let headers = testing::expect_ok(
+        mail::parse_headers(bytes::Bytes::from_string(wire), mail::Limits::standard()),
+        "repeated folds",
+    );
+    let values = headers.values("subject");
+    testing::assert_eq(values.len(), 2);
+    testing::assert_eq(values[0], "first \t \t\t second");
+    testing::assert_eq(
+        testing::expect_ok(mail::decode_header_value(values[1], mail::Limits::standard()), "words"),
+        "ab",
+    );
+    testing::assert_eq(headers.values("x-empty")[0], "");
+}
+
+#[test]
+fn unfolded_value_budget_counts_preserved_fold_whitespace() -> () {
+    let wire = bytes::Bytes::from_string("X: a \r\n \tb\r\n\r\n");
+    let exact = mail::Limits { max_value_bytes: 5, ..mail::Limits::standard() };
+    let headers = testing::expect_ok(mail::parse_headers(wire, exact), "exact unfolded budget");
+    testing::assert_eq(headers.values("x")[0], "a  \tb");
+    testing::assert_eq(
+        testing::expect_err(
+            mail::parse_headers(wire, mail::Limits { max_value_bytes: 4, ..exact }),
+            "preserved whitespace must be charged",
+        ).kind,
+        mail::ErrorKind::Limit,
+    );
+}
+
+#[test]
+fn preserved_folds_keep_framing_controls_and_all_header_limits() -> () {
+    let empty = bytes::Bytes::from_string("X: \t\r\n \t\r\n\r\n");
+    let parsed = testing::expect_ok(
+        mail::parse_headers(empty, mail::Limits { max_value_bytes: 0, ..mail::Limits::standard() }),
+        "empty unfolded field",
+    );
+    testing::assert_eq(parsed.values("x")[0], "");
+    let wire = bytes::Bytes::from_string("X: a \r\n \tb\r\n\r\n");
+    for limits in[
+        mail::Limits { max_header_bytes: wire.len() - 1, ..mail::Limits::standard() },
+        mail::Limits { max_line_bytes: 4, ..mail::Limits::standard() },
+        mail::Limits { max_headers: 0, ..mail::Limits::standard() },
+        mail::Limits { max_input_bytes: wire.len() - 1, ..mail::Limits::standard() },
+    ] {
+        testing::assert_eq(
+            testing::expect_err(mail::parse_headers(wire, limits), "header limits").kind,
+            mail::ErrorKind::Limit,
+        );
+    }
+    for wire in[
+        "X: a\r\n \u0000b\r\n\r\n",
+        "X: a\r\n \u000bb\r\n\r\n",
+        "X: a\r\n \u007fb\r\n\r\n",
+        "X: a\n b\r\n\r\n",
+        "X: a\r\n b\r\n",
+        " x\r\n\r\n",
+    ] {
+        testing::assert_eq(
+            testing::expect_err(
+                mail::parse_headers(bytes::Bytes::from_string(wire), mail::Limits::standard()),
+                "invalid folding",
+            ).kind,
+            mail::ErrorKind::Header,
+        );
+    }
+}

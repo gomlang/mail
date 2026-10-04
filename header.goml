@@ -31,6 +31,47 @@ pub fn decode_header_value(value: string, limits: Limits) -> Result[string, Erro
     )
 }
 
+fn header_space(value: byte) -> bool {
+    value == b' ' || value == b'\t'
+}
+
+fn unfolded_value(input: bytes::Bytes, position: Ref[isize], header_end: isize, limit: isize) -> Result[
+    bytes::Bytes,
+    Error,
+] {
+    let mut cursor = position.get();
+    // Framing and field syntax have already been validated by textproto.
+    while input.get(cursor) != b':' {
+        cursor += 1;
+    }
+    cursor += 1;
+    let output = bytes::Bytes::new();
+    loop {
+        while cursor + 1 < header_end
+            && !(input.get(cursor) == b'\r' && input.get(cursor + 1) == b'\n') {
+            output.push(input.get(cursor));
+            cursor += 1;
+        }
+        cursor += 2;
+        if cursor >= header_end || !header_space(input.get(cursor)) {
+            break
+        }
+    }
+    position.set(cursor);
+    let mut start = 0;
+    let mut end = output.len();
+    while start < end && header_space(output.get(start)) {
+        start += 1;
+    }
+    while end > start && header_space(output.get(end - 1)) {
+        end -= 1;
+    }
+    if end - start > limit {
+        return Result::Err(failure(ErrorKind::Limit, cursor, "header value exceeds limit"))
+    }
+    Result::Ok(bytes::Bytes::from_slice_copy(output.slice(start, end)))
+}
+
 pub fn parse_headers(input: bytes::Bytes, limits: Limits) -> Result[Headers, Error] {
     limits.validate()?;
     if input.len() > limits.max_input_bytes {
@@ -42,7 +83,9 @@ pub fn parse_headers(input: bytes::Bytes, limits: Limits) -> Result[Headers, Err
             max_line_bytes: limits.max_line_bytes,
             max_header_bytes: limits.max_header_bytes,
             max_headers: limits.max_headers,
-            max_value_bytes: limits.max_value_bytes,
+            // The mail value budget applies after preserving fold whitespace.
+            // The intermediate normalized value remains bounded by the block.
+            max_value_bytes: limits.max_header_bytes,
             max_dot_bytes: 0,
         },
     ).map_err(|error| failure(ErrorKind::Limit, error.offset, error.message))?;
@@ -58,7 +101,12 @@ pub fn parse_headers(input: bytes::Bytes, limits: Limits) -> Result[Headers, Err
         ),
     )?;
     let fields = Vec::new();
+    let position = Ref::new(0);
     for field in raw.fields() {
+        let field = textproto::Field {
+            value: unfolded_value(input, position, source.offset(), limits.max_value_bytes)?,
+            ..field,
+        };
         let value = field.value_text().map_err(
             |error| failure(ErrorKind::Encoding, source.offset(), error.message),
         )?;
