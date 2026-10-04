@@ -1,0 +1,22 @@
+package tests;
+
+use ecosystem::mail;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn header_addresses_preserve_tabs_inside_quoted_local_parts() -> () {
+    let headers = testing::expect_ok(
+        mail::parse_headers(
+            bytes::Bytes::from_string("To: User <\"a\tb\"@example.test>\r\n\r\n"),
+            mail::Limits::standard(),
+        ),
+        "headers",
+    );
+    let addresses = testing::expect_ok(
+        headers.addresses("To", mail::Limits::standard()),
+        "addresses",
+    );
+    testing::assert_eq(addresses.len(), 1);
+    testing::assert_eq(addresses[0].local, "\"a\tb\"");
+}

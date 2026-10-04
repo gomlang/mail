@@ -39,13 +39,14 @@ fn validate_local(value: string, base: isize) -> Result[(), Error] {
             let byte = value.byte_get(index);
             if byte == b'\\' {
                 index += 1;
-                if index == value.byte_len() - 1 || value.byte_get(index) < 32
+                if index == value.byte_len() - 1
+                    || (value.byte_get(index) < 32 && value.byte_get(index) != b'\t')
                     || value.byte_get(index) > 126 {
                     return Result::Err(
                         failure(ErrorKind::Invalid, base + index, "invalid quoted local escape"),
                     )
                 }
-            } else if byte < 32 || byte > 126 || byte == b'"' {
+            } else if (byte < 32 && byte != b'\t') || byte > 126 || byte == b'"' {
                 return Result::Err(
                     failure(ErrorKind::Invalid, base + index, "invalid quoted local byte"),
                 )

@@ -15,7 +15,9 @@ name is valid, while an absent or comment-only label is not. Quoted group names
 may contain `@` and angle brackets, just like quoted mailbox display names;
 an unquoted `@` remains invalid display-name punctuation. `Address` exposes the decoded
 display `name`, original validated `address`, `local` and `domain`. The local
-part supports dot atoms and quoted strings; the domain supports DNS-style ASCII
+part supports dot atoms and quoted strings, including space and horizontal tab
+inside the quotes or after a quoted-pair backslash; the validated wire spelling
+is retained. The domain supports DNS-style ASCII
 labels and bracketed literals. Domain literals preserve RFC 5322 `dtext`
 punctuation, including commas, semicolons, colons, parentheses, quotes, angle
 brackets and `@`, without interpreting it as list, comment or mailbox syntax.

@@ -1,0 +1,60 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+fn check_quoted_local_whitespace(local: string) -> () {
+    let source = local + "@example.test";
+    let address = testing::expect_ok(
+        mail::parse_address(source, mail::Limits::standard()),
+        "mailbox",
+    );
+    testing::assert_eq(address.local, local);
+    testing::assert_eq(address.address, source);
+    let list = testing::expect_ok(
+        mail::parse_address_list("Friends: User <" + source + ">;", mail::Limits::standard()),
+        "quoted local in group",
+    );
+    testing::assert_eq(list.len(), 1);
+    testing::assert_eq(list[0].local, local);
+}
+
+#[test]
+fn quoted_local_parts_accept_horizontal_tab_as_whitespace() -> () {
+    // RFC 5322 3.2.4 permits FWS inside quoted strings; HTAB is WSP.
+    for local in Vec::from_array(["\"a\tb\"", "\"\t\"", "\" \ta\t \"", "\"a\t\tb\""]) {
+        check_quoted_local_whitespace(local);
+    }
+}
+
+#[test]
+fn quoted_local_parts_accept_escaped_horizontal_tab() -> () {
+    // RFC 5322 3.2.1 also permits WSP as the escaped byte of a quoted-pair.
+    for local in Vec::from_array(["\"a\\\tb\"", "\"\\\t\""]) {
+        check_quoted_local_whitespace(local);
+    }
+}
+
+#[test]
+fn quoted_local_tab_support_does_not_accept_other_controls_or_bare_whitespace() -> () {
+    for source in Vec::from_array(
+        [
+            "a\tb@example.test",
+            "a b@example.test",
+            "\"a\nb\"@example.test",
+            "\"a\rb\"@example.test",
+            "\"a\u000bb\"@example.test",
+            "\"a\u000cb\"@example.test",
+            "\"a\u007fb\"@example.test",
+            "\"a\\\u000bb\"@example.test",
+        ],
+    ) {
+        testing::assert_eq(
+            testing::expect_err(
+                mail::parse_address(source, mail::Limits::standard()),
+                "invalid local",
+            ).kind,
+            mail::ErrorKind::Invalid,
+        );
+    }
+}
