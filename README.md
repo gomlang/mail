@@ -52,6 +52,8 @@ tabs inside the resulting value, including quoted parameter values and local
 parts. Leading and trailing spaces/tabs are trimmed once around the complete
 unfolded field; its remaining bytes count toward `max_value_bytes`. Adjacent
 MIME encoded words still discard intervening whitespace when explicitly decoded.
+The unfolded size is checked before copying the value. Intermediate framing
+storage is bounded by `max_header_bytes`, rather than the per-value limit.
 
 `Limits::standard()` caps total input at 1 MiB, an address at 4 KiB, addresses
 at 128, comment depth at 8, a physical header line at 998 bytes, the header

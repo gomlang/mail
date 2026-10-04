@@ -45,11 +45,24 @@ fn unfolded_value(input: bytes::Bytes, position: Ref[isize], header_end: isize, 
         cursor += 1;
     }
     cursor += 1;
-    let output = bytes::Bytes::new();
+    let mut start = -1;
+    let mut end = cursor;
+    let mut length = 0;
+    let mut value_length = 0;
     loop {
         while cursor + 1 < header_end
             && !(input.get(cursor) == b'\r' && input.get(cursor + 1) == b'\n') {
-            output.push(input.get(cursor));
+            let space = header_space(input.get(cursor));
+            if start < 0 && !space {
+                start = cursor;
+            }
+            if start >= 0 {
+                length += 1;
+            }
+            if !space {
+                end = cursor + 1;
+                value_length = length;
+            }
             cursor += 1;
         }
         cursor += 2;
@@ -58,18 +71,22 @@ fn unfolded_value(input: bytes::Bytes, position: Ref[isize], header_end: isize, 
         }
     }
     position.set(cursor);
-    let mut start = 0;
-    let mut end = output.len();
-    while start < end && header_space(output.get(start)) {
-        start += 1;
-    }
-    while end > start && header_space(output.get(end - 1)) {
-        end -= 1;
-    }
-    if end - start > limit {
+    if value_length > limit {
         return Result::Err(failure(ErrorKind::Limit, cursor, "header value exceeds limit"))
     }
-    Result::Ok(bytes::Bytes::from_slice_copy(output.slice(start, end)))
+    let output = bytes::Bytes::new();
+    if start >= 0 {
+        cursor = start;
+        while cursor < end {
+            if input.get(cursor) == b'\r' {
+                cursor += 2;
+            } else {
+                output.push(input.get(cursor));
+                cursor += 1;
+            }
+        }
+    }
+    Result::Ok(output)
 }
 
 pub fn parse_headers(input: bytes::Bytes, limits: Limits) -> Result[Headers, Error] {
