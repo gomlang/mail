@@ -1,0 +1,29 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn consumer_retains_quoted_group_punctuation_and_members() -> () {
+    let source = "\"Friends@home\":one@example.test;, \"Team <core>\":;";
+    let items = testing::expect_ok(
+        mail::parse_address_items(source, mail::Limits::standard()),
+        "quoted groups",
+    );
+    testing::assert_eq(items.len(), 2);
+    match items[0] {
+        mail::AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "Friends@home");
+            testing::assert_eq(members.len(), 1);
+            testing::assert_eq(members[0].address, "one@example.test");
+        },
+        _ => testing::fail("first group"),
+    }
+    match items[1] {
+        mail::AddressItem::Group(name, members) => {
+            testing::assert_eq(name, "Team <core>");
+            testing::assert_eq(members.len(), 0);
+        },
+        _ => testing::fail("empty group"),
+    }
+}

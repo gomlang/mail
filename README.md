@@ -11,7 +11,9 @@ group members into the returned address list. A completed group requires a comma
 before another address or group; trailing commas, including those followed by
 whitespace or comments, are rejected. Comments may follow the final member or
 an empty group. Group labels use the same display-name validation as mailboxes; an empty quoted
-name is valid, while an absent or comment-only label is not. `Address` exposes the decoded
+name is valid, while an absent or comment-only label is not. Quoted group names
+may contain `@` and angle brackets, just like quoted mailbox display names;
+an unquoted `@` remains invalid display-name punctuation. `Address` exposes the decoded
 display `name`, original validated `address`, `local` and `domain`. The local
 part supports dot atoms and quoted strings; the domain supports DNS-style ASCII
 labels and bracketed literals. Domain literals preserve RFC 5322 `dtext`

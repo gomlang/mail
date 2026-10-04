@@ -1,0 +1,87 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn quoted_group_names_preserve_mailbox_punctuation() -> () {
+    for (label, expected) in Vec::from_array(
+        [
+            ("\"Friends@home\"", "Friends@home"),
+            ("\"Team <core>\"", "Team <core>"),
+            ("\"Team \\\"A\\\" @home\"", "Team \"A\" @home"),
+            ("\"@<>[]:,;()\"", "@<>[]:,;()"),
+        ],
+    ) {
+        for members in Vec::from_array(["", "a@example.test, b@example.test"]) {
+            let source = "(before) " + label + " (after):" + members + ";";
+            let items = testing::expect_ok(
+                mail::parse_address_items(source, mail::Limits::standard()),
+                "quoted group",
+            );
+            testing::assert_eq(items.len(), 1);
+            let flat = testing::expect_ok(
+                mail::parse_address_list(source, mail::Limits::standard()),
+                "flattened group",
+            );
+            match items[0] {
+                mail::AddressItem::Group(name, addresses) => {
+                    testing::assert_eq(name, expected);
+                    testing::assert_eq(addresses.len(), flat.len());
+                    testing::assert_eq(
+                        addresses.len(),
+                        if members == "" {
+                            0
+                        } else {
+                            2
+                        },
+                    );
+                    for index in 0..addresses.len() {
+                        testing::assert_eq(addresses[index].address, flat[index].address);
+                    }
+                },
+                _ => testing::fail("expected group"),
+            }
+        }
+    }
+}
+
+#[test]
+fn display_names_require_quoting_for_at_signs_in_groups_and_mailboxes() -> () {
+    for source in Vec::from_array(
+        [
+            "Friends@home:a@example.test;",
+            "Friends@home <a@example.test>",
+            "\"Friends@home\" junk:a@example.test;",
+            "\"Friends@home\"junk:a@example.test;",
+            "<a@example.test>:;",
+        ],
+    ) {
+        testing::assert_eq(
+            testing::expect_err(
+                mail::parse_address_items(source, mail::Limits::standard()),
+                "invalid display name",
+            ).kind,
+            mail::ErrorKind::Invalid,
+        );
+        testing::assert_err(mail::parse_address_list(source, mail::Limits::standard()));
+    }
+    testing::assert_err(
+        mail::parse_address("Friends@home <a@example.test>", mail::Limits::standard()),
+    );
+    testing::assert_ok(
+        mail::parse_address("\"Friends@home\" <a@example.test>", mail::Limits::standard()),
+    );
+}
+
+#[test]
+fn quoted_group_name_punctuation_still_obeys_decoded_limit() -> () {
+    let source = "\"A@B\":;";
+    let limits = mail::Limits { max_decoded_bytes: 3, ..mail::Limits::standard() };
+    testing::assert_ok(mail::parse_address_items(source, limits));
+    let limits = mail::Limits { max_decoded_bytes: 2, ..limits };
+    testing::assert_eq(
+        testing::expect_err(mail::parse_address_items(source, limits), "name limit").kind,
+        mail::ErrorKind::Limit,
+    );
+}

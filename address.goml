@@ -178,6 +178,7 @@ fn decode_name(value: string, limits: Limits, base: isize) -> Result[string, Err
         let byte = value.byte_get(index);
         if byte == b'"' || byte == b'<' || byte == b'>' || byte == b',' || byte == b';'
             || byte == b':'
+            || byte == b'@'
             || byte == b'['
             || byte == b']' {
             return Result::Err(
@@ -512,7 +513,7 @@ fn parse_list(value: string, limits: Limits, preserve_groups: bool) -> Result[
             literal = false;
         } else if !angle && !literal && byte == b':' && !group {
             let label = strip_comments(value.byte_slice(start, index), limits, start)?.trim();
-            if label == "" || label.contains("@") || label.contains("<") {
+            if label == "" {
                 return Result::Err(failure(ErrorKind::Invalid, index, "invalid group label"))
             }
             group_name = decode_name(label, limits, start)?;
