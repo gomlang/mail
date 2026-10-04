@@ -1,0 +1,55 @@
+package tests;
+
+use ecosystem::mail;
+use std::testing;
+
+#[test]
+fn bare_backslashes_are_not_unquoted_mailbox_or_group_name_characters() -> () {
+    let limits = mail::Limits::standard();
+    for name in["A\\B", "\\", "A\\ B", "A\\(comment)"] {
+        let mailbox = name + " <x@example.test>";
+        testing::assert_eq(
+            testing::expect_err(mail::parse_address(mailbox, limits), "bare display escape").kind,
+            mail::ErrorKind::Invalid,
+        );
+        for source in[mailbox, name + ": x@example.test;", name + ":;"] {
+            testing::assert_eq(
+                testing::expect_err(
+                    mail::parse_address_list(source, limits),
+                    "bare list display escape",
+                ).kind,
+                mail::ErrorKind::Invalid,
+            );
+            testing::assert_eq(
+                testing::expect_err(
+                    mail::parse_address_items(source, limits),
+                    "bare structured display escape",
+                ).kind,
+                mail::ErrorKind::Invalid,
+            );
+        }
+    }
+}
+
+#[test]
+fn quoted_and_mime_encoded_display_backslashes_remain_valid() -> () {
+    let limits = mail::Limits::standard();
+    for (name, expected) in[("\"A\\\\B\"", "A\\B"), ("=?UTF-8?Q?A=5CB?=", "A\\B"), ("\"\\A\"", "A")] {
+        let parsed = testing::expect_ok(
+            mail::parse_address(name + " <x@example.test>", limits),
+            "escaped display name",
+        );
+        testing::assert_eq(parsed.name, expected);
+        let items = testing::expect_ok(
+            mail::parse_address_items(name + ": x@example.test;", limits),
+            "escaped group name",
+        );
+        match items[0] {
+            mail::AddressItem::Group(group, members) => {
+                testing::assert_eq(group, expected);
+                testing::assert_eq(members.len(), 1);
+            },
+            _ => testing::fail("expected group"),
+        }
+    }
+}

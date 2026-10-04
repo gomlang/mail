@@ -24,7 +24,9 @@ brackets and `@`, without interpreting it as list, comment or mailbox syntax.
 Brackets, backslashes, controls, whitespace and non-ASCII literal contents remain
 unsupported; the library does not interpret a literal as an IP address. Display names may be UTF-8, quoted strings or
 MIME encoded words. Literal square brackets in display names must be quoted or
-encoded; unquoted brackets cannot hide display-name or comment syntax. Comments and horizontal whitespace are supported around
+encoded; unquoted brackets cannot hide display-name or comment syntax. A literal
+backslash in a display or group name must likewise be quoted and escaped, or
+MIME encoded; a bare backslash is not display-name atom syntax. Comments and horizontal whitespace are supported around
 mailboxes; comments inside an addr-spec and obsolete route syntax are rejected.
 Internationalized local parts and domains need an explicit application policy
 and are outside this module.

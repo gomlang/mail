@@ -1,0 +1,29 @@
+package tests;
+
+use ecosystem::mail;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn consumer_address_headers_require_quoted_display_backslashes() -> () {
+    let limits = mail::Limits::standard();
+    let invalid = testing::expect_ok(
+        mail::parse_headers(bytes::Bytes::from_string("To: A\\B <x@example.test>\r\n\r\n"), limits),
+        "header framing",
+    );
+    testing::assert_eq(
+        testing::expect_err(invalid.addresses("to", limits), "bare display backslash").kind,
+        mail::ErrorKind::Invalid,
+    );
+    let valid = testing::expect_ok(
+        mail::parse_headers(
+            bytes::Bytes::from_string("To: \"A\\\\B\" <x@example.test>\r\n\r\n"),
+            limits,
+        ),
+        "quoted header",
+    );
+    testing::assert_eq(
+        testing::expect_ok(valid.addresses("to", limits), "quoted display name")[0].name,
+        "A\\B",
+    );
+}

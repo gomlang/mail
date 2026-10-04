@@ -180,6 +180,7 @@ fn decode_name(value: string, limits: Limits, base: isize) -> Result[string, Err
         if byte == b'"' || byte == b'<' || byte == b'>' || byte == b',' || byte == b';'
             || byte == b':'
             || byte == b'@'
+            || byte == b'\\'
             || byte == b'['
             || byte == b']' {
             return Result::Err(
